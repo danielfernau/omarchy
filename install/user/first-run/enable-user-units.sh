@@ -14,6 +14,7 @@ set -euo pipefail
 systemctl --user daemon-reload
 systemctl --user enable --now \
   bt-agent.service \
+  owed.service \
   omarchy-recover-internal-monitor.service \
   omarchy-sleep-lock.service \
   omarchy-migrate-notify.service \
@@ -23,3 +24,5 @@ systemctl --user enable --now \
 # Separate from the list above so a settings package that has not shipped the
 # unit yet cannot abort bluetooth, sleep lock, or the other first-run services.
 systemctl --user enable --now omarchy-thinkpad-keyboard-backlight.service >/dev/null 2>&1 || true
+
+omarchy-hook-install theme-set /usr/share/owe/10-owe-sync
