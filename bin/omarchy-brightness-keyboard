@@ -29,6 +29,11 @@ if [[ $direction == "off" ]]; then
   brightnessctl -sd "$device" set 0 >/dev/null
   exit 0
 elif [[ $direction == "restore" ]]; then
+  # ThinkPad firmware keys never reach Hyprland. The watcher stores the last
+  # firmware level; prefer that over brightnessctl's save, which is often 0.
+  if [[ $device == "tpacpi::kbd_backlight" ]] && omarchy-thinkpad-keyboard-backlight --restore; then
+    exit 0
+  fi
   brightnessctl -rd "$device" >/dev/null
   exit 0
 fi
