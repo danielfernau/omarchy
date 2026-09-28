@@ -131,6 +131,15 @@ class Store:
             self._unlock(fd)
 
 
+def seed_live_level(store):
+    if store.read_saved() is not None:
+        return False
+    level = read_int_file(os.path.join(led_dir(), "brightness"))
+    if level is None or level <= 0 or not valid_level(level):
+        return False
+    return store.write_saved(level)
+
+
 def apply_saved(store):
     level = store.read_saved()
     if level is None:
@@ -294,6 +303,7 @@ def main(argv):
         )
 
     watcher = Watcher(store)
+    seed_live_level(store)
     apply_saved(store)
     stop = {"value": False}
 

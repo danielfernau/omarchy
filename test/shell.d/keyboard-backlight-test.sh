@@ -85,7 +85,7 @@ fi
 SH
 chmod +x "$mock_bin/brightnessctl" "$watcher" "$keyboard_command"
 
-sed "s|/sys/class/leds/\*kbd_backlight\*|$led_root/*kbd_backlight*|" \
+sed "s|^leds_root=/sys/class/leds|leds_root=$led_root|" \
   "$keyboard_command" >"$tmpdir/omarchy-brightness-keyboard"
 chmod +x "$tmpdir/omarchy-brightness-keyboard"
 
@@ -137,7 +137,7 @@ run_keyboard restore
 pass "out-of-range ThinkPad saved level falls back to brightnessctl"
 
 other_current="$other_dir/brightness"
-sed "s|/sys/class/leds/\*kbd_backlight\*|$tmpdir/other-leds/*kbd_backlight*|" \
+sed "s|^leds_root=/sys/class/leds|leds_root=$tmpdir/other-leds|" \
   "$keyboard_command" >"$tmpdir/other-keyboard"
 chmod +x "$tmpdir/other-keyboard"
 : >"$call_log"
@@ -151,6 +151,87 @@ CALL_LOG="$call_log" \
   "$tmpdir/other-keyboard" --no-osd restore
 [[ $(<"$other_current") == restored ]] || fail "non-ThinkPad restore ignores the ThinkPad state file" "actual: $(<"$other_current")"
 pass "non-ThinkPad restore ignores the ThinkPad state file"
+
+both_root="$tmpdir/both-leds"
+both_tpacpi="$both_root/tpacpi::kbd_backlight"
+both_other="$both_root/other::kbd_backlight"
+mkdir -p "$both_tpacpi" "$both_other"
+printf '0\n' >"$both_tpacpi/brightness"
+printf '2\n' >"$both_tpacpi/max_brightness"
+printf '0\n' >"$both_other/brightness"
+printf '2\n' >"$both_other/max_brightness"
+sed "s|^leds_root=/sys/class/leds|leds_root=$both_root|" \
+  "$keyboard_command" >"$tmpdir/both-keyboard"
+chmod +x "$tmpdir/both-keyboard"
+: >"$call_log"
+printf '2\n' >"$state_path"
+CALL_LOG="$call_log" \
+  CURRENT_FILE="$both_tpacpi/brightness" \
+  MAX_FILE="$both_tpacpi/max_brightness" \
+  XDG_STATE_HOME="$state_home" \
+  XDG_RUNTIME_DIR="$runtime" \
+  OMARCHY_THINKPAD_KBD_LED_DIR="$both_tpacpi" \
+  OMARCHY_THINKPAD_KBD_STATE="$state_path" \
+  OMARCHY_THINKPAD_KBD_LOCK="$state_home/omarchy/keyboard-backlight.lock" \
+  OMARCHY_THINKPAD_KBD_SUPPRESS="$runtime/suppress" \
+  PATH="$mock_bin:$ROOT/bin:$PATH" \
+  "$tmpdir/both-keyboard" --no-osd restore
+grep -F -- '-d tpacpi::kbd_backlight set 2' "$call_log" >/dev/null ||
+  fail "restore does not prefer tpacpi::kbd_backlight when another keyboard LED exists" "$(cat "$call_log")"
+pass "restore prefers tpacpi::kbd_backlight when another keyboard LED exists"
+
+seed_led="$tmpdir/seed-led"
+mkdir -p "$seed_led"
+printf '2\n' >"$seed_led/max_brightness"
+printf '2\n' >"$seed_led/brightness"
+printf '2\n' >"$seed_led/brightness_hw_changed"
+seed_state="$tmpdir/seed-state"
+seed_event="$tmpdir/seed-events"
+seed_dbus="$tmpdir/seed-dbus"
+mkfifo "$seed_event" "$seed_dbus"
+rm -f "$seed_state"
+OMARCHY_THINKPAD_KBD_LED_DIR="$seed_led" \
+  OMARCHY_THINKPAD_KBD_STATE="$seed_state" \
+  OMARCHY_THINKPAD_KBD_LOCK="$tmpdir/seed.lock" \
+  OMARCHY_THINKPAD_KBD_SUPPRESS="$tmpdir/seed.suppress" \
+  OMARCHY_THINKPAD_KBD_EVENT_FIFO="$seed_event" \
+  OMARCHY_THINKPAD_KBD_DBUS_FIFO="$seed_dbus" \
+  CALL_LOG="$call_log" \
+  CURRENT_FILE="$seed_led/brightness" \
+  MAX_FILE="$seed_led/max_brightness" \
+  PATH="$mock_bin:$PATH" \
+  "$watcher" &
+seed_pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [[ -f $seed_state && $(<"$seed_state") == 2 ]] && break
+  sleep 0.05
+done
+kill "$seed_pid" 2>/dev/null || true
+wait "$seed_pid" 2>/dev/null || true
+[[ $(<"$seed_state") == 2 ]] || fail "watcher does not seed a missing state file from a live non-zero level" "actual: $(cat "$seed_state" 2>/dev/null || echo missing)"
+pass "watcher seeds a missing state file from a live non-zero level"
+
+printf '0\n' >"$seed_led/brightness"
+rm -f "$seed_state"
+OMARCHY_THINKPAD_KBD_LED_DIR="$seed_led" \
+  OMARCHY_THINKPAD_KBD_STATE="$seed_state" \
+  OMARCHY_THINKPAD_KBD_LOCK="$tmpdir/seed.lock" \
+  OMARCHY_THINKPAD_KBD_SUPPRESS="$tmpdir/seed.suppress" \
+  OMARCHY_THINKPAD_KBD_EVENT_FIFO="$seed_event" \
+  OMARCHY_THINKPAD_KBD_DBUS_FIFO="$seed_dbus" \
+  CALL_LOG="$call_log" \
+  CURRENT_FILE="$seed_led/brightness" \
+  MAX_FILE="$seed_led/max_brightness" \
+  PATH="$mock_bin:$PATH" \
+  "$watcher" &
+seed_pid=$!
+sleep 0.2
+kill "$seed_pid" 2>/dev/null || true
+wait "$seed_pid" 2>/dev/null || true
+if [[ -e $seed_state ]]; then
+  fail "watcher seeds 0 into a missing state file" "actual: $(<"$seed_state")"
+fi
+pass "watcher does not seed 0 into a missing state file"
 
 event_fifo="$tmpdir/events"
 dbus_fifo="$tmpdir/dbus"
